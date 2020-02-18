@@ -1,0 +1,205 @@
+#!/usr/bin/env python3
+#
+# convert pnm scans to reasonably-sized PDFs.
+
+import multiprocessing
+import argparse
+
+import noteshrink
+import yaml
+
+# debug
+import random
+import time
+
+
+class NumberedWorkItem:
+    def __init__(self, number, work):
+        self.number = number
+        self.work = work
+
+
+class NumberedWorkOutput:
+    def __init__(self, number, data):
+        self.number = number
+        self.data = data
+
+
+class PDFWorker:
+    def __init__(self, work_queue, results_queue, options):
+        self.options = options
+        self.results_queue = results_queue
+        while not work_queue.empty():
+            work_item = work_queue.get()
+            self.do_work(work_item)
+
+    def do_work(self, work_item):
+        number = work_item.number
+        # sleep a random amount, max 2000 ms
+        delay = random.randrange(0, 2000)
+        time.sleep(delay / 1000)
+        # check in the output
+        output = NumberedWorkOutput(number, None)
+        self.results_queue.put(output)
+
+
+class PDFBuilder:
+    def __init__(self, options):
+        self.options = options
+        self.remaining = len(options.filenames)
+        self.results_buffer = []
+
+    def run(self, results_queue):
+        while self.remaining > 0:
+            result = results_queue.get()
+            self.process_result(result)
+            self.remaining = self.remaining - 1
+
+    def process_result(self, numbered_work_output):
+        print("received result no. {:d}".format(numbered_work_output.number))
+
+
+class PDFWorkQueue:
+    def __init__(self, options):
+        # use the options in this object later
+        self.options = options
+
+        # create a work queue and a results queue
+        self.work_queue = multiprocessing.Queue()
+        for number, filename in enumerate(options.filenames):
+            self.work_queue.put(NumberedWorkItem(1 + number, filename))
+        self.results_queue = multiprocessing.Queue()
+
+    def run(self):
+        # start the workers
+        self.procs = []
+        for _ in range(self.options.general.nworkers):
+            proc = multiprocessing.Process(target=PDFWorker,
+                                           args=(self.work_queue,
+                                                 self.results_queue,
+                                                 self.options))
+            self.procs.append(proc)
+            proc.start()
+
+        # run the consumer
+        builder = PDFBuilder(self.options)
+        builder.run(self.results_queue)
+
+        # end the workers after the work is done
+        for proc in self.procs:
+            proc.join()
+
+
+class Options:
+    """we hold options in this strange object."""
+    def __init__(self, infile, filenames):
+        # these are the members we want to fill
+        self.filenames = None
+        self.general = None
+        self.metadata = None
+        self.noteshrink = None
+        self.pngquant = None
+        self.optipng = None
+
+        # properly load all filenames
+        self.get_filenames(filenames)
+
+        # load all options from input file
+        self.load_options_from_file(infile, "general")
+        self.load_options_from_file(infile, "metadata")
+        self.load_options_from_file(infile, "noteshrink")
+        self.load_options_from_file(infile, "pngquant")
+        self.load_options_from_file(infile, "optipng")
+
+    def load_options_from_file(self, filename, optname):
+        # some default options
+        defaults = {
+            "general": {
+                "pdfname": "out.pdf",
+                "dpi": 300,
+                "nworkers": 2,
+            },
+            "metadata": {
+                "title": "A Scanned Document",
+                "author": "Example Person",
+                "subject": "Interesting Stuff",
+                "keywords": "word1, word2",
+            },
+            "noteshrink": {
+                "enable": True,
+                "value_threshold": 0.4,
+                "sat_threshold": 0.2,
+                "num_colors": 8,
+                "sample_fraction": 5,
+                "saturate": True,
+                "white_bg": False,
+                "quiet": True,
+                "kmeans_iter": 5,
+            },
+            "pngquant": {
+                "enable": True,
+            },
+            "optipng": {
+                "enable": True,
+            }
+        }
+        # load from the yaml input
+        ns = argparse.Namespace()
+        with open(filename) as ifl:
+            d = yaml.load(ifl, Loader=yaml.FullLoader)
+            # add defaults
+            for k, v in defaults[optname].items():
+                if k not in d:
+                    setattr(ns, k, v)
+            # load from file
+            for k, v in d[optname].items():
+                setattr(ns, k, v)
+        # save ns to options object
+        setattr(self, optname, ns)
+
+    def get_filenames(self, filenames):
+        o = argparse.Namespace()
+        o.sort_numerically = True
+        o.filenames = filenames
+        self.filenames = noteshrink.get_filenames(o)
+
+    def __str__(self):
+        return """Options:
+ nfiles: {:d}
+ general: {:s}
+ metadata: {:s}
+ noteshrink: {:s}
+ pngquant: {:s}
+ optipng: {:s}""".format(len(self.filenames), str(self.general),
+                         str(self.metadata), str(self.noteshrink),
+                         str(self.pngquant), str(self.optipng))
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Convert some images to PDF. Be opinionated.")
+    parser.add_argument("infile", metavar="FILE", nargs=1, help="input yaml")
+    parser.add_argument("filenames",
+                        metavar="IMAGE",
+                        nargs="+",
+                        help="files to convert")
+
+    args = parser.parse_args()
+    return Options(args.infile[0], args.filenames)
+
+
+def run_program(options):
+    print("Running convert-scans...")
+    print(options)
+    print("Starting work...")
+    wq = PDFWorkQueue(options)
+    wq.run()
+    print("Done. Check {:s}".format(options.general.pdfname))
+
+
+if __name__ == "__main__":
+    run_program(parse_args())
+
+# Local Variables:
+# mode: python
+# End:

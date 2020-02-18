@@ -1,0 +1,28 @@
+* Deps (arch linux packages from community repo)
+
+1. python-pillow
+2. optipng
+3. pngquant
+4. img2pdf
+5. python-scikit-learn
+6. python-pyaml
+7. python-tqdm
+8. python-pdfrw
+
+* Deps (arch linux extra)
+1. python-numpy
+
+*  Deps (AUR)
+1. noteshrink
+
+* Idea
+
+for each image, run the following pipeline:
+
+pnm -> pil -> noteshrink* -> pillow png -> pngquant -> optipng -> img2pdf
+
+*customized noteshring with mini-batch kmeans
+
+then concatenate to a pdf and write some metadata using img2pdf
+
+settings are all stored in a yaml file

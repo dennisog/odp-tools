@@ -1,0 +1,25 @@
+general:
+  pdfname: "scan-out.pdf"
+  dpi: 300
+  nworkers: 2
+
+metadata:
+  title: "a scanned document"
+  author: "example person"
+  subject: "interesting stuff"
+  keywords: "key1, word2"
+
+noteshrink:
+  enable: True
+  value_threshold: 0.4
+  sat_threshold: 0.2
+  num_colors: 8
+  sample_fraction: 5
+  saturate: True
+  kmeans_iter: 5
+
+pngquant:
+  enable: True
+
+optipng:
+  enable: True
