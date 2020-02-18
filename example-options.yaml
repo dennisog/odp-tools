@@ -8,6 +8,7 @@ metadata:
   author: "example person"
   subject: "interesting stuff"
   keywords: "key1, word2"
+  creator: "ODP Tools v?"
 
 noteshrink:
   enable: True
@@ -17,6 +18,7 @@ noteshrink:
   sample_fraction: 5
   saturate: True
   kmeans_iter: 5
+  convert_to_rgb: True
 
 pngquant:
   enable: True

@@ -4,59 +4,204 @@
 
 import multiprocessing
 import argparse
+import io
+import datetime
+from dateutil.tz import tzlocal
 
 import noteshrink
 import yaml
+import img2pdf
+import pdfrw
+import tqdm
+import numpy as np
+from PIL import Image
+from scipy.cluster.vq import kmeans
 
-# debug
-import random
-import time
 
-
-class NumberedWorkItem:
-    def __init__(self, number, work):
+class NumberedThing:
+    """we need to keep track of the page numbers while processing the pages. this
+isa very simple mechanism to to so."""
+    def __init__(self, number, thing):
         self.number = number
-        self.work = work
+        self.thing = thing
 
 
-class NumberedWorkOutput:
-    def __init__(self, number, data):
-        self.number = number
-        self.data = data
+class HackedNoteShrink:
+    """a slightly modfied version of Matt Zucker's noteshrink tool."""
+    def run(self, img):
+        samples = noteshrink.sample_pixels(img, self.options)
+        palette = self.get_palette(samples)
+        labels = noteshrink.apply_palette(img, palette, self.options)
+
+        if self.options.saturate:
+            palette = palette.astype(np.float32)
+            pmin = palette.min()
+            pmax = palette.max()
+            palette = 255 * (palette - pmin) / (pmax - pmin)
+            palette = palette.astype(np.uint8)
+
+        if self.options.white_bg:
+            palette = palette.copy()
+            palette[0] = (255, 255, 255)
+
+        output_img = Image.fromarray(labels, 'P')
+        output_img.putpalette(palette.flatten())
+        if self.options.convert_to_rgb:
+            return output_img.convert("RGB")
+        else:
+            return output_img
+
+    def get_palette(self, samples):
+        """this allows some customization for the kmeans algo"""
+        bg_color = noteshrink.get_bg_color(samples, 6)
+
+        fg_mask = noteshrink.get_fg_mask(bg_color, samples, self.options)
+
+        centers, _ = kmeans(samples[fg_mask].astype(np.float32),
+                            self.options.num_colors - 1,
+                            iter=self.options.kmeans_iter)
+
+        palette = np.vstack((bg_color, centers)).astype(np.uint8)
+        return palette
+
+    def __init__(self, options):
+        self.options = options
+
+    def shrink(self, imbuf):
+        # load image using pillow and run noteshrink. noteshrink returns a
+        # pillow image
+        image, dpi = noteshrink.load(imbuf)
+        out_image = self.run(image)
+
+        # write the image as optimzed PNG to output buffer
+        pngopts = {"optimize": True, "dpi": dpi}
+        obuf = io.BytesIO()
+        out_image.save(obuf, format="PNG", **pngopts)
+        obuf.seek(0)
+        return obuf
 
 
 class PDFWorker:
+    """take a filename from the queue, process that file, put a bytes array of a
+pdf version of that file on the results queue."""
     def __init__(self, work_queue, results_queue, options):
+        # work until there is no more work
         self.options = options
         self.results_queue = results_queue
         while not work_queue.empty():
-            work_item = work_queue.get()
-            self.do_work(work_item)
+            self.do_work(work_queue.get())
 
     def do_work(self, work_item):
-        number = work_item.number
-        # sleep a random amount, max 2000 ms
-        delay = random.randrange(0, 2000)
-        time.sleep(delay / 1000)
-        # check in the output
-        output = NumberedWorkOutput(number, None)
+        # execute the processing pipeline
+        raw_imbuf = self.load_image(work_item.thing)
+        shrunk_imbuf = self.run_noteshrink(raw_imbuf)
+        quant_imbuf = self.run_pngquant(shrunk_imbuf)
+        opt_imbuf = self.run_optipng(quant_imbuf)
+
+        pdfbuf = self.run_img2pdf(opt_imbuf)
+
+        # check the processed file into the results queue
+        output = NumberedThing(work_item.number, pdfbuf.getvalue())
         self.results_queue.put(output)
+
+    def load_image(self, filename):
+        with open(filename, "rb") as ifl:
+            return io.BytesIO(ifl.read())
+
+    # the work functions below all take a BytesIO as an input and return a
+    # BytesIO as output. that way I can chain them and disable a step in the
+    # pipeline if needed
+
+    def run_noteshrink(self, imbuf):
+        noteshrink = HackedNoteShrink(self.options.noteshrink)
+        return noteshrink.shrink(imbuf)
+
+    def run_pngquant(self, imbuf):
+        # TODO: implement
+        return imbuf
+
+    def run_optipng(self, imbuf):
+        # TODO: implement
+        return imbuf
+
+    def run_img2pdf(self, imbuf):
+        """embed the image in a PDF file."""
+        obuf = io.BytesIO()
+        img2pdf.convert(imbuf, outputstream=obuf)
+        return obuf
 
 
 class PDFBuilder:
+    """wait for the processing of all pages and construct the output pdf."""
     def __init__(self, options):
         self.options = options
-        self.remaining = len(options.filenames)
-        self.results_buffer = []
 
-    def run(self, results_queue):
-        while self.remaining > 0:
-            result = results_queue.get()
-            self.process_result(result)
-            self.remaining = self.remaining - 1
+    def run(self, results_queue, remaining):
+        self.remaining = remaining
+        self.results_buffer = []
+        self.last_written = -1
+        self.pdf = None
+        with tqdm.tqdm(total=self.remaining,
+                       desc="processing images...") as pbar:
+            while self.remaining > 0:
+                result = results_queue.get()
+                self.process_result(result)
+                self.remaining = self.remaining - 1
+                pbar.update()
 
     def process_result(self, numbered_work_output):
-        print("received result no. {:d}".format(numbered_work_output.number))
+        self.rbuffer_add(numbered_work_output)
+        if self.rbuffer_in_sequence():
+            self.append_pdf()
+
+    def rbuffer_add(self, numbered_work_output):
+        self.results_buffer.append(numbered_work_output)
+        self.results_buffer.sort(key=lambda x: x.number)
+
+    def rbuffer_in_sequence(self):
+        tlist = [self.last_written] + [x.number for x in self.results_buffer]
+        return sorted(tlist) == list(range(min(tlist), max(tlist) + 1))
+
+    def append_pdf(self):
+        for item in self.results_buffer:
+            # pull the new page out of the work item
+            newpage = pdfrw.PdfReader(fdata=item.thing, verbose=False).pages[0]
+
+            # if necessary, create the output pdf
+            if self.pdf is None:
+                self.pdf = pdfrw.PdfWriter(self.options.general.pdfname,
+                                           version="1.4")
+
+            # add the page to the output pdf
+            self.pdf.addpage(newpage)
+            self.write_pdf()
+
+            # increase internal counter
+            self.last_written = item.number
+        self.results_buffer = []
+
+    def write_pdf(self):
+        # this needs to be set on every write, otherwise subsequent writes
+        # overwrite these values.
+        now = self.get_pdf_time()
+        self.pdf.trailer.Info = pdfrw.IndirectPdfDict(
+            Title=self.options.metadata.title,
+            Author=self.options.metadata.author,
+            Subject=self.options.metadata.subject,
+            Keywords=self.options.metadata.keywords,
+            Creator=self.options.metadata.creator,
+            CreationDate=now,
+            ModDate=now,
+        )
+        self.pdf.write()
+
+    def get_pdf_time(self):
+        """produce a valid pdf time string for the current time."""
+        dt = datetime.datetime.now(tzlocal())
+        ofst = dt.strftime("%z")
+        uoff = ofst[0] + ofst[1:3] + "'" + ofst[3:5] + "'"
+        fmt = "D:%Y%m%d%H%M%S{:s}".format(uoff)
+        return dt.strftime(fmt)
 
 
 class PDFWorkQueue:
@@ -67,10 +212,13 @@ class PDFWorkQueue:
         # create a work queue and a results queue
         self.work_queue = multiprocessing.Queue()
         for number, filename in enumerate(options.filenames):
-            self.work_queue.put(NumberedWorkItem(1 + number, filename))
+            self.work_queue.put(NumberedThing(number, filename))
         self.results_queue = multiprocessing.Queue()
 
     def run(self):
+        if self.options.general.nworkers < 1:
+            print("need workers.")
+            exit(1)
         # start the workers
         self.procs = []
         for _ in range(self.options.general.nworkers):
@@ -83,7 +231,7 @@ class PDFWorkQueue:
 
         # run the consumer
         builder = PDFBuilder(self.options)
-        builder.run(self.results_queue)
+        builder.run(self.results_queue, len(self.options.filenames))
 
         # end the workers after the work is done
         for proc in self.procs:
@@ -135,6 +283,7 @@ class Options:
                 "white_bg": False,
                 "quiet": True,
                 "kmeans_iter": 5,
+                "convert_to_rgb": False,
             },
             "pngquant": {
                 "enable": True,
@@ -189,9 +338,8 @@ def parse_args():
 
 
 def run_program(options):
-    print("Running convert-scans...")
+    print("Running convert-scans.\n")
     print(options)
-    print("Starting work...")
     wq = PDFWorkQueue(options)
     wq.run()
     print("Done. Check {:s}".format(options.general.pdfname))
