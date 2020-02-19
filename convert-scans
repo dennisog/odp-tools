@@ -6,6 +6,9 @@ import multiprocessing
 import argparse
 import io
 import datetime
+import subprocess
+import tempfile
+import os
 from dateutil.tz import tzlocal
 
 import noteshrink
@@ -15,7 +18,7 @@ import pdfrw
 import tqdm
 import numpy as np
 from PIL import Image
-from scipy.cluster.vq import kmeans
+from sklearn.cluster import MiniBatchKMeans
 
 
 class NumberedThing:
@@ -46,10 +49,7 @@ class HackedNoteShrink:
 
         output_img = Image.fromarray(labels, 'P')
         output_img.putpalette(palette.flatten())
-        if self.options.convert_to_rgb:
-            return output_img.convert("RGB")
-        else:
-            return output_img
+        return output_img
 
     def get_palette(self, samples):
         """this allows some customization for the kmeans algo"""
@@ -57,9 +57,14 @@ class HackedNoteShrink:
 
         fg_mask = noteshrink.get_fg_mask(bg_color, samples, self.options)
 
-        centers, _ = kmeans(samples[fg_mask].astype(np.float32),
-                            self.options.num_colors - 1,
-                            iter=self.options.kmeans_iter)
+        # use mini-batch k means from sklearn instead of scipy kmeans
+        mbk = MiniBatchKMeans(init="k-means++",
+                              n_clusters=self.options.num_colors - 1,
+                              max_iter=self.options.kmeans_iter,
+                              batch_size=self.options.kmeans_batch_size,
+                              compute_labels=False)
+        mbk.fit(samples[fg_mask].astype(np.float32))
+        centers = mbk.cluster_centers_
 
         palette = np.vstack((bg_color, centers)).astype(np.uint8)
         return palette
@@ -67,14 +72,14 @@ class HackedNoteShrink:
     def __init__(self, options):
         self.options = options
 
-    def shrink(self, imbuf):
+    def shrink(self, imbuf, dpi):
         # load image using pillow and run noteshrink. noteshrink returns a
         # pillow image
-        image, dpi = noteshrink.load(imbuf)
+        image, _ = noteshrink.load(imbuf)
         out_image = self.run(image)
 
         # write the image as optimzed PNG to output buffer
-        pngopts = {"optimize": True, "dpi": dpi}
+        pngopts = {"optimize": True, "dpi": (dpi, dpi)}
         obuf = io.BytesIO()
         out_image.save(obuf, format="PNG", **pngopts)
         obuf.seek(0)
@@ -113,21 +118,55 @@ pdf version of that file on the results queue."""
     # pipeline if needed
 
     def run_noteshrink(self, imbuf):
+        if not self.options.noteshrink.enable:
+            return imbuf
         noteshrink = HackedNoteShrink(self.options.noteshrink)
-        return noteshrink.shrink(imbuf)
+        return noteshrink.shrink(imbuf, self.options.general.dpi)
 
     def run_pngquant(self, imbuf):
-        # TODO: implement
-        return imbuf
+        if not self.options.pngquant.enable:
+            return imbuf
+        cmd = [
+            self.options.pngquant.path,
+            "--speed={:d}".format(self.options.pngquant.speed),
+            "--quality=0-{:d}".format(self.options.pngquant.max_quality), "-"
+        ]
+        cp = subprocess.run(cmd,
+                            input=imbuf.getbuffer(),
+                            capture_output=True,
+                            check=True)
+        return io.BytesIO(cp.stdout)
 
     def run_optipng(self, imbuf):
-        # TODO: implement
-        return imbuf
+        if not self.options.optipng.enable:
+            return imbuf
+        with tempfile.TemporaryDirectory() as tempdir:
+            inpath = os.path.join(tempdir, "in")
+            opath = os.path.join(tempdir, "out")
+            # dump image to disk
+            with open(inpath, "wb") as inf:
+                inf.write(imbuf.read())
+
+            # run optipng
+            opts = ["-out={:s}".format(opath), "--"]
+            cmd = [self.options.optipng.path] + opts + [inpath]
+            subprocess.run(cmd, check=True, capture_output=True)
+            with open(opath, "rb") as of:
+                return io.BytesIO(of.read())
 
     def run_img2pdf(self, imbuf):
         """embed the image in a PDF file."""
+        # first need to convert the png to RGB, otherwise pdfrw will complain
+        rgb_imbuf = io.BytesIO()
+        pngopts = {
+            "format": "PNG",
+            "optimize": True,
+            "dpi": (self.options.general.dpi, self.options.general.dpi)
+        }
+        Image.open(imbuf).convert("RGB").save(rgb_imbuf, **pngopts)
+        rgb_imbuf.seek(0)
         obuf = io.BytesIO()
-        img2pdf.convert(imbuf, outputstream=obuf)
+        img2pdf.convert(rgb_imbuf, outputstream=obuf)
         return obuf
 
 
@@ -283,13 +322,17 @@ class Options:
                 "white_bg": False,
                 "quiet": True,
                 "kmeans_iter": 5,
-                "convert_to_rgb": False,
+                "kmeans_batch_size": 100,
             },
             "pngquant": {
                 "enable": True,
+                "speed": 3,
+                "max_quality": 100,
+                "path": "pngquant"
             },
             "optipng": {
                 "enable": True,
+                "path": "optipng"
             }
         }
         # load from the yaml input

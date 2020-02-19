@@ -14,14 +14,17 @@ noteshrink:
   enable: True
   value_threshold: 0.4
   sat_threshold: 0.2
-  num_colors: 8
+  num_colors: 4
   sample_fraction: 5
   saturate: True
   kmeans_iter: 5
-  convert_to_rgb: True
+  kmeans_batch_size: 80
+  white_bg: False
 
 pngquant:
-  enable: True
+  enable: False
+  speed: 3
+  max_quality: 100
 
 optipng:
-  enable: True
+  enable: False
