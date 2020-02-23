@@ -20,10 +20,14 @@ import numpy as np
 from PIL import Image
 from sklearn.cluster import MiniBatchKMeans
 
+from metadata import PDFMetadata
+from metadata import get_thumbnail
+from colors import SRGBColorspace
+
 
 class NumberedThing:
     """we need to keep track of the page numbers while processing the pages. this
-isa very simple mechanism to to so."""
+is a very simple mechanism to to so."""
     def __init__(self, number, thing):
         self.number = number
         self.thing = thing
@@ -31,6 +35,29 @@ isa very simple mechanism to to so."""
 
 class HackedNoteShrink:
     """a slightly modfied version of Matt Zucker's noteshrink tool."""
+    """
+MIT License
+
+Copyright (c) 2016, Matt Zucker
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+    """
     def run(self, img):
         samples = noteshrink.sample_pixels(img, self.options)
         palette = self.get_palette(samples)
@@ -174,6 +201,17 @@ class PDFBuilder:
     """wait for the processing of all pages and construct the output pdf."""
     def __init__(self, options):
         self.options = options
+        self.metadata = PDFMetadata(
+            title=self.options.metadata.title,
+            author=self.options.metadata.author,
+            subject=self.options.metadata.subject,
+            keywords=self.options.metadata.keywords,
+            creator=self.options.metadata.creator,
+        )
+        if self.options.metadata.thumbnail:
+            self.metadata.thumbnail = get_thumbnail(self.options.filenames[0],
+                                                    (300, 300))
+        self.colorspace = SRGBColorspace()
 
     def run(self, results_queue, remaining):
         self.remaining = remaining
@@ -222,16 +260,11 @@ class PDFBuilder:
     def write_pdf(self):
         # this needs to be set on every write, otherwise subsequent writes
         # overwrite these values.
-        now = self.get_pdf_time()
-        self.pdf.trailer.Info = pdfrw.IndirectPdfDict(
-            Title=self.options.metadata.title,
-            Author=self.options.metadata.author,
-            Subject=self.options.metadata.subject,
-            Keywords=self.options.metadata.keywords,
-            Creator=self.options.metadata.creator,
-            CreationDate=now,
-            ModDate=now,
-        )
+        self.pdf.trailer.Info = self.metadata.pdfInfo()
+        self.pdf.trailer.ID = self.metadata.pdfID()
+        self.pdf.trailer.Root.Metadata = self.metadata.pdfXMP()
+        self.pdf.trailer.Root.OutputIntents = self.colorspace.pdfOutputIntent()
+
         self.pdf.write()
 
     def get_pdf_time(self):
@@ -311,6 +344,7 @@ class Options:
                 "author": "Example Person",
                 "subject": "Interesting Stuff",
                 "keywords": "word1, word2",
+                "thumbnail": False,
             },
             "noteshrink": {
                 "enable": True,

@@ -12,8 +12,10 @@
 * Deps (arch linux extra)
 1. python-numpy
 
-*  Deps (AUR)
+* Deps (AUR)
 1. noteshrink
+2. python-xmp-toolkit
+3. verapdf (optional, to test PDF/A compliance)
 
 * Idea
 
