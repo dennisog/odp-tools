@@ -1,0 +1,13 @@
+#!/usr/bin/env python3
+#
+
+from compliance import MakePDFCompliant
+
+if __name__ == "__main__":
+    make_comply = MakePDFCompliant()
+    make_comply.parse_args()
+    make_comply.run()
+
+# Local Variables:
+# mode: python
+# End:

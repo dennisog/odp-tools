@@ -12,11 +12,11 @@ import pdfrw
 import img2pdf
 
 DIR = Path(__file__).absolute().parent
-sys.path.append(str(DIR.parent))
+sys.path.append(str(DIR.parent / "odp_tools"))
 
-from odp_tools.metadata import PDFMetadata
-from odp_tools.metadata import get_thumbnail
-from odp_tools.colors import SRGBColorspace
+from metadata import PDFMetadata
+from metadata import get_thumbnail
+from colors import SRGBColorspace
 
 
 def editable_pdf_from_img(path: Path):
