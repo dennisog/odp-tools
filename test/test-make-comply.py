@@ -20,16 +20,18 @@ class TestMakeComply(unittest.TestCase):
         self.assertNotEqual(vera, None)
 
     def test_make_comply(self):
+        print("")
         sample_path = DIR / "samples" / "non_compliant.pdf"
         make_comply = MakePDFCompliant()
         with tempfile.TemporaryDirectory() as tempdir:
-            pdf_path = Path(tempdir) / "in.pdf"
-            old_path = Path(tempdir) / "in.pdf.orig"
+            pdf_path = Path(tempdir) / "sample.pdf"
+            old_path = Path(tempdir) / "sample.pdf.orig"
             shutil.copyfile(sample_path, pdf_path)
             options = Namespace()
             options.filenames = [str(pdf_path)]
             options.keep_original = True
-            options.thumbnail = True
+            options.thumbnail = False
+            options.keep_date = False
             make_comply.options = options
             make_comply.run()
             self.assertTrue(old_path.exists())

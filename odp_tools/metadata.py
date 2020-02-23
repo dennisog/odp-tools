@@ -159,8 +159,18 @@ data. this class holds data for which this is true."""
                 setattr(self, thing, kwargs[thing])
             else:
                 setattr(self, thing, "")
+        if "pdfInfo" in kwargs:
+            self.init_from_info(kwargs["pdfInfo"])
         if not self.has_time():
             self.time = datetime.datetime.now(tzlocal())
+
+    def init_from_info(self, info):
+        pairs = [("/Title", "title"), ("/Subject", "subject"),
+                 ("/Keywords", "keywords"), ("/Author", "author"),
+                 ("/Creator", "creator"), ("/Producer", "producer")]
+        for k1, k2 in pairs:
+            if k1 in info:
+                setattr(self, k2, info[k1][1:-1])
 
     def has_time(self):
         return not self.time == ""

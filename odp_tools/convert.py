@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-#
 # convert pnm scans to reasonably-sized PDFs.
 
 import multiprocessing
@@ -399,32 +397,3 @@ class Options:
  optipng: {:s}""".format(len(self.filenames), str(self.general),
                          str(self.metadata), str(self.noteshrink),
                          str(self.pngquant), str(self.optipng))
-
-
-def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Convert some images to PDF. Be opinionated.")
-    parser.add_argument("infile", metavar="FILE", nargs=1, help="input yaml")
-    parser.add_argument("filenames",
-                        metavar="IMAGE",
-                        nargs="+",
-                        help="files to convert")
-
-    args = parser.parse_args()
-    return Options(args.infile[0], args.filenames)
-
-
-def run_program(options):
-    print("Running convert-scans.\n")
-    print(options)
-    wq = PDFWorkQueue(options)
-    wq.run()
-    print("Done. Check {:s}".format(options.general.pdfname))
-
-
-if __name__ == "__main__":
-    run_program(parse_args())
-
-# Local Variables:
-# mode: python
-# End:
