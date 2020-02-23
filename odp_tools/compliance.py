@@ -64,7 +64,6 @@ class MakePDFCompliant:
     def convert_file(self, filepath):
         # (1) load the pdf, move all pages to the new file
         origpath = filepath.rename(filepath.with_suffix(".pdf.orig"))
-        print(origpath)
         reader = pdfrw.PdfReader(str(origpath))
         writer = pdfrw.PdfWriter(filepath, version="1.4")
         for page in reader.pages:
