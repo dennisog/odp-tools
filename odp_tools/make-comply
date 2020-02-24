@@ -5,8 +5,8 @@ from compliance import MakePDFCompliant
 
 if __name__ == "__main__":
     print("Running make-comply...")
-    make_comply = MakePDFCompliant()
-    make_comply.parse_args()
+    make_comply = MakePDFCompliant(
+        MakePDFCompliant.get_argument_parser().parse_args())
     print(make_comply.options)
     make_comply.run()
 

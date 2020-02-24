@@ -8,35 +8,45 @@ import shutil
 from pathlib import Path
 from argparse import Namespace
 
+import pdfrw
+
 DIR = Path(__file__).absolute().parent
 sys.path.append(str(DIR.parent / "odp_tools"))
 
-from compliance import MakePDFCompliant
+from pages import PageDropper
 
 
-class TestMakeComply(unittest.TestCase):
+class TestPageDropper(unittest.TestCase):
     def test_find_verapdf(self):
         vera = shutil.which("verapdf")
         self.assertNotEqual(vera, None)
 
-    def test_make_comply(self):
+    def test_page_dropper(self):
         print("")
-        sample_path = DIR / "samples" / "non_compliant.pdf"
+        sample_path = DIR / "samples" / "drop.pdf"
         with tempfile.TemporaryDirectory() as tempdir:
             pdf_path = Path(tempdir) / "sample.pdf"
             old_path = Path(tempdir) / "sample.pdf.orig"
             shutil.copyfile(sample_path, pdf_path)
             options = Namespace()
-            options.filenames = [str(pdf_path)]
+            options.filename = [str(pdf_path)]
             options.keep_original = True
-            options.thumbnail = False
-            options.keep_date = False
-            make_comply = MakePDFCompliant(options)
-            make_comply.run()
+            options.write_metadata = True
+            options.pages = [2]
+            pagedropper = PageDropper(options)
+            pagedropper.run()
+            self.check_page_count(pdf_path, 2)
             self.assertTrue(old_path.exists())
-            cmd = ["verapdf", "-f", "1b", "--format", "text", str(pdf_path)]
+            cmd = [
+                "verapdf", "-v", "-f", "1b", "--format", "text",
+                str(pdf_path)
+            ]
             cp = subprocess.run(cmd, check=True)
             self.assertEqual(cp.returncode, 0)
+
+    def check_page_count(self, path, expected):
+        reader = pdfrw.PdfReader(str(path))
+        self.assertEqual(len(reader.pages), expected)
 
 
 if __name__ == "__main__":

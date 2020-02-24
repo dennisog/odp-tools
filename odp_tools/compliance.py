@@ -16,11 +16,8 @@ from colors import SRGBColorspace
 
 
 class MakePDFCompliant:
-    def __init__(self):
-        self.options = None
-        self.srgb = SRGBColorspace()
-
-    def parse_args(self):
+    @staticmethod
+    def get_argument_parser():
         parser = argparse.ArgumentParser(
             description="Modify a PDF file to become PDF/A-1B")
         parser.add_argument("filenames",
@@ -45,15 +42,20 @@ class MakePDFCompliant:
                             dest="keep_date",
                             default=False,
                             help="keep the CreationDate")
-        self.options = parser.parse_args()
-        if self.options.keep_date is True:
+        return parser
+
+    def __init__(self, options):
+        self.options = options
+        if options.keep_date is True:
             # need to parse the pdf date from the string. possible, but I don't
             # need it. I just overwrite with current date.
             raise NotImplementedError()
-        if self.options.thumbnail is True:
+        if options.thumbnail is True:
             # need to extract a thumbnail from the pdf. not super easily done
             # in PIL (PIL only writes to pdfs. implement when really needed)
             raise NotImplementedError()
+
+        self.srgb = SRGBColorspace()
 
     def run(self):
         for fn in self.options.filenames:

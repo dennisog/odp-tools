@@ -287,8 +287,7 @@ class PDFWorkQueue:
 
     def run(self):
         if self.options.general.nworkers < 1:
-            print("need workers.")
-            exit(1)
+            raise RuntimeError("Need workers")
         # start the workers
         self.procs = []
         for _ in range(self.options.general.nworkers):
@@ -310,7 +309,21 @@ class PDFWorkQueue:
 
 class Options:
     """we hold options in this strange object."""
-    def __init__(self, infile, filenames):
+    @staticmethod
+    def get_argument_parser():
+        parser = argparse.ArgumentParser(
+            description="Convert some images to PDF. Be opinionated.")
+        parser.add_argument("infile",
+                            metavar="FILE",
+                            nargs=1,
+                            help="input yaml")
+        parser.add_argument("filenames",
+                            metavar="IMAGE",
+                            nargs="+",
+                            help="files to convert")
+        return parser
+
+    def __init__(self, ns):
         # these are the members we want to fill
         self.filenames = None
         self.general = None
@@ -320,9 +333,10 @@ class Options:
         self.optipng = None
 
         # properly load all filenames
-        self.get_filenames(filenames)
+        self.get_filenames(ns.filenames)
 
         # load all options from input file
+        infile = ns.infile[0]
         self.load_options_from_file(infile, "general")
         self.load_options_from_file(infile, "metadata")
         self.load_options_from_file(infile, "noteshrink")
